@@ -2,8 +2,8 @@
 <html lang="vi">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="strict-origin-when-cross-origin">
-<title>GPS realtime</title><link rel="stylesheet" href="/vendor/leaflet.css"><link rel="stylesheet" href="/style.css?v=17">
-<script defer src="/vendor/leaflet.js"></script><script defer src="/vendor/signalr.min.js"></script><script defer src="/app.js?v=14"></script>
+<title>GPS realtime</title><link rel="stylesheet" href="/vendor/leaflet.css"><link rel="stylesheet" href="/style.css?v=19">
+<script defer src="/vendor/leaflet.js"></script><script defer src="/vendor/signalr.min.js"></script><script defer src="/app.js?v=16"></script>
 </head>
 <body>
 <header class="topbar">
@@ -34,8 +34,16 @@
         <label id="secondary-option" class="route-choice"><input id="route-secondary" type="radio" name="road-route"><span data-i18n>Tuyến 2</span><b id="secondary-distance"></b></label>
       </fieldset>
     </section>
+    <section class="control-section demo-section" aria-labelledby="demo-title">
+      <div class="section-heading"><svg class="icon" aria-hidden="true"><use href="/icons.svg#car"></use></svg><h2 id="demo-title" data-i18n>Xe demo</h2><span class="section-number">02</span></div>
+      <div class="demo-speed"><label for="demo-speed" data-i18n>Tốc độ (km/h)</label><input id="demo-speed" type="number" min="1" max="300" step="1" value="60" required></div>
+      <div class="demo-buttons"><button id="demo-start" type="button" disabled data-i18n>Chạy xe</button><button id="demo-pause" type="button" class="secondary" disabled data-i18n>Tạm dừng</button><button id="demo-reset" type="button" class="secondary" disabled data-i18n>Về đầu</button></div>
+      <progress id="demo-progress" max="1" value="0" aria-label="Tiến độ xe demo" data-i18n-aria-label></progress>
+      <p id="demo-status" class="status-text" role="status" data-i18n>Chọn tuyến ô tô để chạy demo.</p>
+      <p class="status-text" data-i18n>Gửi vị trí demo tới mọi thiết bị. Tắt GPS thật trên thiết bị khác.</p>
+    </section>
     <section class="control-section gps-section" aria-labelledby="gps-title">
-      <div class="section-heading"><svg class="icon" aria-hidden="true"><use href="/icons.svg#radio"></use></svg><h2 id="gps-title" data-i18n>Vị trí trực tiếp</h2><span class="section-number">02</span></div>
+      <div class="section-heading"><svg class="icon" aria-hidden="true"><use href="/icons.svg#radio"></use></svg><h2 id="gps-title" data-i18n>Vị trí trực tiếp</h2><span class="section-number">03</span></div>
       <div class="buttons"><button id="gps"><svg class="icon" aria-hidden="true"><use href="/icons.svg#play"></use></svg><span data-i18n>Bật GPS</span></button><button id="stop" class="secondary" aria-label="Dừng GPS" title="Dừng GPS" data-i18n-aria-label data-i18n-title disabled><svg class="icon" aria-hidden="true"><use href="/icons.svg#square"></use></svg></button></div>
       <label class="route-mode"><input id="follow-gps" type="checkbox" checked><span data-i18n>Theo vị trí GPS</span></label>
       <p id="sharing" class="status-text" role="status" data-i18n>Chưa gửi vị trí.</p><button id="retry" class="secondary" hidden data-i18n>Kết nối lại</button><p id="error" role="alert" hidden></p>

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createContext, runInContext } from 'node:vm';
 import { HubConnectionBuilder, HttpTransportType, LogLevel } from '@microsoft/signalr';
 
-const origin = process.env.GPS_URL || 'http://localhost:5085';
+const origin = process.env.GPS_URL || 'http://localhost:5086';
 const connections = [];
 const request = (path, body) => fetch(`${origin}${path}`, {
   ...(body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
@@ -37,6 +37,7 @@ const app = readFileSync(new URL('../wwwroot/app.js', import.meta.url), 'utf8');
 const iconMarkup = '<svg><use href="/icons.svg#sun"></use></svg>';
 function frontend(saved = null, systemDark = true, savedLanguage = null) {
   const elements = new Map(), storage = new Map(saved ? [['gps-theme', saved]] : []);
+  const clock = { now: 0 }, intervals = new Map(); let intervalId = 0;
   if (savedLanguage) storage.set('gps-language', savedLanguage);
   const document = {
     querySelectorAll(selector) {
@@ -46,7 +47,8 @@ function frontend(saved = null, systemDark = true, savedLanguage = null) {
     },
     documentElement: { dataset: {} }, getElementById(id) {
       if (!elements.has(id)) elements.set(id, {
-        value: '', dataset: {}, checked: id === 'follow-gps', disabled: id === 'recenter', innerHTML: iconMarkup,
+        value: id === 'demo-speed' ? '60' : '', dataset: {}, checked: id === 'follow-gps', disabled: id === 'recenter', innerHTML: iconMarkup,
+        reportValidity() { const n = Number(this.value); return Number.isInteger(n) && n >= 1 && n <= 300; },
         set textContent(value) { this.text = value; this.innerHTML = ''; }, get textContent() { return this.text || ''; },
         button: { dataset: {}, innerHTML: iconMarkup, set textContent(value) { this.text = value; this.innerHTML = ''; }, setAttribute(name, value) { this[name] = value; }, getAttribute(name) { return this[name] ?? null; } },
         querySelector() { return this.button; }, addEventListener() { }, setAttribute(name, value) { this[name] = value; }, getAttribute(name) { return this[name] ?? null; }, classList: { toggle() { } }
@@ -61,20 +63,24 @@ function frontend(saved = null, systemDark = true, savedLanguage = null) {
   const layer = (points = []) => ({
     points, addTo() { return this; }, bindTooltip(value) { this.tooltip = value; return this; }, setTooltipContent(value) { this.tooltip = value; return this; },
     on(event, handler) { this[event] = handler; return this; }, setStyle(style) { this.style = style; return this; }, bringToFront() { this.front = true; return this; },
-    setLatLng(value) { this.points = value; return this; }, setRadius() { return this; },
+    getElement: () => null, setLatLng(value) { this.points = value; return this; }, setRadius() { return this; },
     setLatLngs(value) { this.points = value; return this; }, getLatLngs() { return this.points; }
   });
   const map = { on(event, handler) { this[event] = handler; return this; }, setView(points, zoom) { this.center = points; this.zoom = zoom; return this; }, panTo(points) { this.center = points; return this; }, getSize() { return { y: this.height || 400 }; }, fitBounds(points, options) { this.bounds = points; this.padding = options; return this; }, removeLayer(value) { value.removed = true; } };
   const hub = { state: 'Disconnected', start: () => new Promise(() => { }), on() { }, onreconnecting() { }, onreconnected() { }, onclose() { }, invoke: async () => ({ start: null, end: null, location: null, routeSequence: 0 }) };
   const context = createContext({
     document, history: { replaceState() { } }, location: { pathname: '/' },
-    window: { matchMedia: () => ({ matches: systemDark }), addEventListener() { } }, setInterval() { }, setTimeout: (callback, delay) => setTimeout(callback, delay === 1100 ? 0 : delay), clearTimeout, AbortController, URL,
+    window: { matchMedia: () => ({ matches: systemDark }), addEventListener() { } },
+    setInterval(callback) { intervals.set(++intervalId, callback); return intervalId; }, clearInterval: id => intervals.delete(id),
+    performance: { now: () => clock.now }, navigator: { geolocation: { clearWatch() { }, watchPosition: () => 0 } },
+    setTimeout: (callback, delay) => setTimeout(callback, delay === 1100 ? 0 : delay), clearTimeout, AbortController, URL,
     localStorage: { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value) },
-    L: { map: () => map, tileLayer: layer, polyline: layer, circleMarker: layer, circle: layer, marker: layer, divIcon: value => value, latLng: (lat, lng) => ({ lat, lng }) },
+    L: { map: () => map, tileLayer: layer, polyline: layer, circleMarker: layer, circle: layer, marker: layer, divIcon: value => value,
+      latLng: (lat, lng) => ({ lat, lng, distanceTo(other) { return Math.hypot(other.lat - lat, (other.lng - lng + 540) % 360 - 180) * 111195; } }) },
     signalR: { HubConnectionState: { Disconnected: 'Disconnected' }, HubConnectionBuilder: class { withUrl() { return this; } withAutomaticReconnect() { return this; } build() { return hub; } } }
   });
   runInContext(app, context);
-  return { context, document, storage, hub, map, theme: document.getElementById('theme') };
+  return { context, document, storage, hub, map, clock, intervals, theme: document.getElementById('theme') };
 }
 async function checkFrontend() {
   const ui = frontend();
@@ -347,6 +353,82 @@ async function checkFrontend() {
   assert.equal(retry.hidden, false, 'provider distance limit offers retry');
 }
 
+async function checkDemo() {
+  const ui = frontend(), sent = []; let fail = false;
+  const run = source => runInContext(source, ui.context);
+  const flush = () => new Promise(resolve => setTimeout(resolve, 0));
+  ui.context.testRoutes = [
+    { geometry: { coordinates: [[0, 0], [0, 0], [.0001, 0], [.001, 0]] }, distance: 9999 },
+    { geometry: { coordinates: [[0, 0], [0, .001]] }, distance: 111 }
+  ];
+  ui.context.fetch = async (path, options) => {
+    assert.equal(path, '/api/location'); const point = JSON.parse(options.body); sent.push(point);
+    return { ok: !fail, status: fail ? 503 : 200, json: async () => ({ ...point, receivedAt: new Date().toISOString(), sequence: sent.length }) };
+  };
+  assert.equal(ui.document.getElementById('demo-start').disabled, true, 'demo requires road geometry');
+  run('syncing = false; roadRoutes = testRoutes; selectRoadRoute(0)');
+  assert.ok(Math.abs(run('demoDistances.at(-1)') - 111.195) < .001, 'demo measures geometry, not provider summary');
+  for (const value of ['', '0', '-1', '301', 'NaN', 'Infinity']) {
+    ui.document.getElementById('demo-speed').value = value; run('startDemo()');
+    assert.equal(run('demoTimer'), undefined, `invalid speed ${value}`);
+  }
+  ui.document.getElementById('demo-speed').value = '36';
+  let cleared;
+  ui.context.navigator.geolocation.clearWatch = id => { cleared = id; };
+  run('watchId = 0; startDemo()'); await flush();
+  assert.equal(cleared, 0, 'demo stops this device GPS');
+  assert.equal(sent[0].longitude, 0, 'demo starts at route origin');
+  assert.equal(ui.document.getElementById('demo-speed').disabled, true, 'pause before editing speed');
+  ui.clock.now += 1000; await run('tickDemo()');
+  assert.ok(Math.abs(sent.at(-1).longitude - 10 / 111195) < 1e-9, '36 km/h advances 10 metres per second');
+  ui.document.getElementById('demo-pause').onclick();
+  const count = sent.length;
+  ui.clock.now += 20000; await run('tickDemo()');
+  assert.equal(sent.length, count, 'pause stops publishing');
+  ui.document.getElementById('demo-speed').value = '72'; run('startDemo()'); await flush();
+  ui.clock.now += 1000; await run('tickDemo()');
+  assert.ok(Math.abs(sent.at(-1).longitude - 30 / 111195) < 1e-9, 'resume uses new speed across uneven segments');
+  const timer = run('demoTimer');
+  ui.document.getElementById('language').value = 'en'; ui.document.getElementById('language').onchange();
+  assert.equal(run('demoTimer'), timer, 'language switch preserves demo');
+  assert.match(ui.document.getElementById('demo-status').textContent, /Car running/);
+  fail = true; ui.clock.now += 10000; await run('tickDemo()');
+  assert.equal(run('demoTimer'), timer, 'failed final upload retries');
+  fail = false; ui.clock.now += 1000; await run('tickDemo()');
+  assert.equal(run('demoTimer'), undefined, 'accepted endpoint stops demo');
+  assert.ok(Math.abs(sent.at(-1).longitude - .001) < 1e-9, 'finish clamps to endpoint');
+  assert.equal(ui.document.getElementById('demo-progress').value, 1);
+  ui.document.getElementById('demo-reset').onclick(); await flush();
+  assert.equal(sent.at(-1).longitude, 0, 'reset publishes origin');
+  let resolveLate, pendingSignal;
+  ui.context.fetch = (path, options) => { pendingSignal = options.signal; return new Promise(resolve => { resolveLate = resolve; }); };
+  run('startDemo(); selectRoadRoute(1)');
+  assert.equal(pendingSignal.aborted, true, 'switching route aborts demo upload');
+  resolveLate({ ok: true, status: 200, json: async () => ({ latitude: 20, longitude: 20, sequence: 100 }) }); await flush();
+  assert.equal(run('demoTimer'), undefined, 'route change stops demo');
+  assert.equal(run('demoMetres'), 0, 'route change resets distance');
+  assert.notEqual(run('latest?.latitude'), 20, 'late old-route response is ignored');
+  run('resetDemo({ geometry: { coordinates: [[179.999, 0], [-179.999, 0]] } }); demoMetres = demoDistances.at(-1) / 2');
+  assert.ok(Math.abs(Math.abs(run('demoPosition().longitude')) - 180) < 1e-9, 'dateline interpolation stays on route');
+  run('resetDemo({ geometry: { coordinates: [[0, 0], [0, 0]] } }); startDemo()');
+  assert.equal(ui.document.getElementById('demo-start').disabled, true, 'zero-length route cannot start');
+
+  const live = frontend();
+  live.context.route = ui.context.testRoutes[0];
+  live.context.previous = (await (await request('/api/state')).json()).location;
+  live.context.fetch = (path, options) => fetch(`${origin}${path}`, options);
+  runInContext('syncing = false; latest = previous; resetDemo(route); demoSpeed = 36; demoTimer = setInterval(tickDemo, 1000)', live.context);
+  for (const elapsed of [0, 1000]) {
+    live.clock.now = elapsed;
+    const events = connections.map(connection => receive(connection, 'LocationUpdated'));
+    await runInContext('tickDemo()', live.context);
+    const point = JSON.parse(runInContext('JSON.stringify(latest)', live.context));
+    for (const received of await Promise.all(events)) assert.deepEqual(received, point, 'demo reaches both real SignalR viewers');
+    assert.ok(Math.abs(point.longitude - elapsed / 1000 * 10 / 111195) < 1e-9, 'shared position follows configured speed');
+  }
+  runInContext('stop()', live.context);
+}
+
 try {
   await checkFrontend();
   for (const path of ['/api/health', '/', '/app.js', '/style.css', '/icons.svg', '/vendor/leaflet.js', '/vendor/signalr.min.js'])
@@ -405,7 +487,8 @@ try {
   await a.stop();
   await a.start();
   assert.deepEqual(await a.invoke('GetState'), expected, 'reconnect snapshot');
-  console.log('PASS: GPS recenter/follow, English/Vietnamese language, road routing geometry, long routes, cancellation/retry, Google Maps links, A/B import, theme, frontend reconnect, assets, route/GPS validation, two viewers.');
+  await checkDemo();
+  console.log('PASS: shared demo car speed/pause/reset/finish, GPS recenter/follow, English/Vietnamese language, road routing geometry, long routes, cancellation/retry, Google Maps links, A/B import, theme, frontend reconnect, assets, route/GPS validation, two viewers.');
 } finally {
   await Promise.all(connections.map(connection => connection.stop()));
 }

@@ -1,6 +1,6 @@
 # GPS Realtime
 
-A shared map for choosing start and destination points, finding real road routes, and following live GPS updates across devices. Built with .NET 8, SignalR, Leaflet, and plain JavaScript.
+A shared map for choosing start and destination points, finding real road routes, and following live GPS or a simulated car across devices. Built with .NET 8, SignalR, Leaflet, and plain JavaScript.
 
 ## Run Locally
 
@@ -39,6 +39,17 @@ Routing snaps endpoints to nearby roads within 200 m. It does not draw invented 
 
 The theme button switches between light and dark mode, including the map. The first visit follows the system theme; later visits use the saved choice. Dark map tiles use a CSS color filter, leaving routes and GPS markers unchanged.
 
+### Demo Car
+
+1. Set both endpoints, enable **Car routing**, then select a route.
+2. Under **Demo car**, enter a speed from **1–300 km/h** and select **Start car**. The car starts at the route's first road coordinate.
+3. Select **Pause** to change speed, then **Start car** to resume. **Reset** pauses playback and sends the car back to the route origin. Reaching the end stops playback; the next start begins again.
+4. Open the same URL on another device to watch the shared car. Viewers do not need to enable GPS or routing.
+
+Playback measures distance along the road geometry and publishes positions once per second through the existing GPS API/SignalR flow. Changing the route, editing endpoints, retrying routing, or disabling routing stops and resets the demo. Changing language preserves playback.
+
+Starting the demo stops real GPS in that tab. **Turn off GPS and other demos on other devices**: they share the same location and can overwrite each other. Pause/reset controls belong to the publishing tab. Keep that tab open and active; background timers may be throttled. Simulated positions use `accuracy: 0`; the API does not separately label them as demo data. The car icon also represents real GPS locations.
+
 ## Phone Access
 
 GPS requires HTTPS, except on `localhost`. Plain HTTP over a LAN IP is not sufficient. With Cloudflare's `cloudflared` executable available at `artifacts/cloudflared.exe`, run:
@@ -64,7 +75,7 @@ $env:GPS_URL = 'http://localhost:5086'
 npm run check
 ```
 
-Checks cover frontend language/theme preferences, route geometry and alternatives using mocked provider responses, cancellation/retry, GPS following, Google Maps imports, input validation, reconnect snapshots, and broadcasts to two real SignalR clients. They do not validate physical GPS or live routing-provider availability.
+Checks default to `http://localhost:5086`; `GPS_URL` overrides it. They cover car speed, pause/resume/reset, route changes, endpoint retry, frontend language/theme preferences, route geometry and alternatives using mocked provider responses, cancellation/retry, GPS following, Google Maps imports, input validation, reconnect snapshots, and broadcasts to two real SignalR clients. They do not validate physical GPS or live routing-provider availability.
 
 ## Privacy and Limits
 
@@ -73,5 +84,5 @@ Checks cover frontend language/theme preferences, route geometry and alternative
 - [FOSSGIS public routing](https://www.fossgis.de/arbeitsgruppen/osm-server/nutzungsbedingungen/) receives both endpoint coordinates. Requests are debounced to at most one per second per tab; the service has no uptime guarantee and map data may be incomplete or outdated.
 - `shortest: true` uses hierarchical search for long routes. Warning `205` does not reject an otherwise valid route; actual errors, including provider distance limits, still fail. Use a suitably configured self-hosted Valhalla instance for high traffic or exhaustive shortest-path searches.
 - These are car routes, not freight clearance. Truck dimensions, weight, transport permissions, border procedures, and mandatory checkpoints are not checked. The demo has only A/B; the main project must supply required crossings as waypoints and validate shipping constraints separately.
-- No GPS simulation, address search, turn-by-turn navigation, or Pegaxus business workflows.
+- No address search, turn-by-turn navigation, or Pegaxus business workflows. Car simulation is browser-driven, without a server-side playback scheduler.
 - OpenStreetMap attribution and `strict-origin-when-cross-origin` are retained. Tiles are not proxied or bulk-downloaded. A Cloudflare tunnel passes traffic through Cloudflare and does not replace production authentication or storage.

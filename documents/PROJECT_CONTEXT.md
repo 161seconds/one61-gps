@@ -4,7 +4,7 @@ Cập nhật: **27/10/2026**. Tài liệu mô tả mã nguồn hiện tại tron
 
 ## 1. Mục đích và phạm vi
 
-GPS Realtime là sandbox kiểm chứng việc chọn hai điểm A/B, tìm đường ô tô thực tế và chia sẻ vị trí GPS giữa các thiết bị cùng mở một URL. Tên package là `pegaxus-gps-sandbox`, nhưng repository này chưa triển khai nghiệp vụ Pegaxus.
+GPS Realtime là sandbox kiểm chứng việc chọn hai điểm A/B, tìm đường ô tô thực tế và chia sẻ vị trí GPS giữa các thiết bị cùng mở một URL. Có chế độ xe demo chạy theo tuyến đã chọn với tốc độ cấu hình, gửi vị trí tới các thiết bị qua luồng GPS hiện có. Tên package là `pegaxus-gps-sandbox`, nhưng repository này chưa triển khai nghiệp vụ Pegaxus.
 
 Ứng dụng dùng **một phiên chung cho toàn bộ người truy cập**. Không có tài khoản, token, chuyến đi riêng, phân quyền hay cơ sở dữ liệu. Phạm vi hiện tại phục vụ thử nghiệm; không coi đây là hệ thống theo dõi vận tải đã sẵn sàng vận hành thực tế.
 
@@ -31,7 +31,7 @@ GPS Realtime là sandbox kiểm chứng việc chọn hai điểm A/B, tìm đư
 | [GoogleMapsLink.cs](../GoogleMapsLink.cs) | Kiểm tra URL Google Maps, mở short link, trích xuất tọa độ |
 | [GpsDemo.csproj](../GpsDemo.csproj) | Target .NET 8, nullable và implicit usings |
 | [wwwroot/index.html](../wwwroot/index.html) | Giao diện A/B, chọn tuyến, GPS, ngôn ngữ và theme |
-| [wwwroot/app.js](../wwwroot/app.js) | Leaflet, GPS, HTTP, SignalR, reconnect, tìm đường, dịch giao diện |
+| [wwwroot/app.js](../wwwroot/app.js) | Leaflet, GPS, xe demo, HTTP, SignalR, reconnect, tìm đường, dịch giao diện |
 | [wwwroot/style.css](../wwwroot/style.css) | Bố cục desktop/mobile, theme, trạng thái và accessibility |
 | [wwwroot/icons.svg](../wwwroot/icons.svg) | SVG sprite dùng chung cho giao diện |
 | [scripts/vendor.mjs](../scripts/vendor.mjs) | Copy Leaflet, SignalR và license vào `wwwroot/vendor` sau khi cài npm |
@@ -51,6 +51,7 @@ GPS Realtime là sandbox kiểm chứng việc chọn hai điểm A/B, tìm đư
 | GPS mới nhất | RAM server: `latest` | Có |
 | `routeSequence` và sequence GPS | RAM server, hai bộ đếm độc lập | Có, trong snapshot/event tương ứng |
 | Geometry tuyến ô tô, tuyến đang chọn, bật/tắt tìm đường | Bộ nhớ từng tab | Không |
+| Tốc độ, tiến độ, timer và điều khiển xe demo | Bộ nhớ tab phát demo | Không; chỉ vị trí xe được gửi lên server và broadcast |
 | Vệt GPS | Bộ nhớ từng tab, tối đa 200 mẫu | Không lưu lịch sử trên server |
 | Theo GPS, vị trí/zoom bản đồ | Từng tab | Không |
 | Ngôn ngữ và theme | `localStorage`: `gps-language`, `gps-theme` | Lưu trong trình duyệt, không đồng bộ qua server |
@@ -78,6 +79,17 @@ Frontend tuần tự hóa việc lưu A/B, giữ thay đổi mới đang chờ v
 Request gửi GPS có timeout 10 giây. Frontend bỏ qua HTTP `409`; lỗi mạng được hiển thị và mẫu tiếp theo có thể thử lại. Dừng GPS hủy request đang gửi, dọn `watchPosition`; `pagehide` cũng gọi dừng.
 
 **Theo vị trí GPS** bật mặc định. Kéo bản đồ sẽ tắt theo dõi; nút về GPS bật lại theo dõi và giữ zoom hiện tại. GPS bị đánh dấu cũ khi thời điểm chụp hoặc thời điểm nhận đã quá 15 giây. Vị trí GPS không bị kéo vào tuyến và không tự tìm lại đường khi đi lệch tuyến.
+
+### Xe demo theo tuyến
+
+1. Chọn đủ A/B, bật tìm đường, chọn tuyến rồi nhập tốc độ **1–300 km/h** trong phần **Xe demo**.
+2. **Chạy xe** dừng GPS thật trong tab này, bắt đầu/tiếp tục xe trên geometry tuyến đang chọn. Tạm dừng để đổi tốc độ.
+3. Khoảng cách cộng dồn giữa các điểm được tính bằng Leaflet `distanceTo`; tiến độ tính từ tốc độ và thời gian `performance.now()`, không tăng đều theo số điểm. Geometry là nguồn quãng đường, không dùng distance tóm tắt của provider để nội suy.
+4. Mỗi giây gửi `LocationInput` tới `POST /api/location`, với `accuracy: 0` và timestamp mới. `LocationUpdated`/snapshot đưa vị trí tới mọi thiết bị, kể cả tab không bật tìm đường. Marker xe áp dụng cho cả GPS thật và demo.
+5. **Tạm dừng** giữ tiến độ; **Về đầu** dừng và gửi một vị trí ở đầu tuyến. Cuối tuyến được giới hạn đúng điểm cuối; chỉ dừng hoàn tất khi mẫu cuối đã được server chấp nhận, lỗi gửi còn được thử lại.
+6. Đổi tuyến, đổi A/B, retry hoặc tắt tìm đường dừng/reset demo. Đổi ngôn ngữ giữ tiến độ. Bật GPS thật hoặc rời trang dừng demo trong tab hiện tại.
+
+Không có API mô phỏng riêng, không thêm field phân biệt demo vào contract GPS. Các nút điều khiển chỉ tác động tab đang phát; GPS/demo trên thiết bị khác vẫn có thể ghi đè vị trí chung. Chỉ dùng một nguồn phát tại một thời điểm. Giữ tab demo mở và hoạt động; chưa có bộ lập lịch server để bảo đảm chạy nền.
 
 ### Kết nối và reconnect
 
@@ -220,16 +232,17 @@ npm run check
 Remove-Item Env:GPS_URL
 ```
 
-Nếu không đặt `GPS_URL`, script mặc định gọi `http://localhost:5085`. Hai terminal phải chạy cùng mã nguồn cần kiểm tra.
+Nếu không đặt `GPS_URL`, script mặc định gọi `http://localhost:5086` để tránh phiên demo thông thường ở `5085`. Hai terminal phải chạy cùng mã nguồn cần kiểm tra.
 
 Phạm vi kiểm tra đã có trong script:
 
 - Frontend trong Node.js VM với DOM/Leaflet giả lập: theme, Việt/Anh, giữ icon và trạng thái khi đổi ngôn ngữ, theo GPS, recenter, reconnect snapshot và nhập link.
 - Routing bằng response giả lập: geometry, tuyến thay thế, đường dài/warning `205`, validation, hủy request, bỏ phản hồi cũ, retry và không vẽ đường giả.
+- Xe demo với clock giả lập: tốc độ theo mét/giây, segment không đều/trùng nhau, tạm dừng/tiếp tục, đổi tốc độ, về đầu, đổi tuyến, bỏ phản hồi cũ, lỗi gửi điểm cuối và nội suy qua kinh tuyến 180 độ. Vị trí demo cũng được kiểm tra broadcast tới hai SignalR client thật.
 - HTTP tới server thật: health, static assets, link Google Maps đầy đủ, validation A/B/GPS, timestamp, field bắt buộc và duplicate `409`.
 - Hai SignalR client qua WebSocket thật: broadcast cùng dữ liệu, snapshot và snapshot sau kết nối lại.
 
-Script không thay thế kiểm tra trình duyệt thật, GPS thiết bị thật, độ chính xác bản đồ, short-link Google đang hoạt động hay tính sẵn sàng/CORS của Valhalla. Việc bổ sung tài liệu này không đồng nghĩa các kiểm tra runtime đã được chạy lại.
+Script không thay thế kiểm tra trình duyệt thật, GPS thiết bị thật, độ chính xác bản đồ, short-link Google đang hoạt động hay tính sẵn sàng/CORS của Valhalla. Phạm vi trên mô tả những gì script kiểm tra, không phải cam kết về mọi môi trường chạy.
 
 ## 8. Giới hạn và lưu ý khi phát triển tiếp
 
@@ -237,7 +250,7 @@ Script không thay thế kiểm tra trình duyệt thật, GPS thiết bị th�
 - **Lưu trữ và triển khai:** dữ liệu chỉ ở RAM một process; restart mất dữ liệu, nhiều instance không có trạng thái/broadcast dùng chung. Vệt 200 mẫu chỉ là dữ liệu cục bộ trong tab.
 - **Dịch vụ ngoài:** A/B được gửi tới FOSSGIS; tile tải từ OpenStreetMap; short link cần Google. Giới hạn request tìm đường nằm ở từng tab, không phải quota toàn hệ thống. Dịch vụ công cộng không bảo đảm uptime.
 - **Nghiệp vụ vận tải:** chưa có waypoint bắt buộc, kiểm tra cửa khẩu, giấy phép, kích thước/tải trọng xe hoặc hạn chế vận tải hàng hóa. Tuyến ô tô hiển thị không xác nhận đủ điều kiện vận chuyển.
-- **Tính năng chưa có:** tìm địa chỉ theo tên, GPS giả lập, chỉ dẫn từng chặng, tự tìm lại đường khi lệch tuyến, lịch sử bền vững và tích hợp API nghiệp vụ Pegaxus.
+- **Tính năng chưa có:** tìm địa chỉ theo tên, bộ lập lịch demo chạy nền trên server, chỉ dẫn từng chặng, tự tìm lại đường khi lệch tuyến, lịch sử bền vững và tích hợp API nghiệp vụ Pegaxus.
 - **Giao diện:** mặc định tiếng Việt; lưu lựa chọn Việt/Anh, sáng/tối tại browser. Theme tối dùng CSS filter riêng cho tile, giữ màu marker/tuyến. Tên đường/địa điểm giữ nguyên theo dữ liệu OpenStreetMap.
 
 Khi sửa tính năng, giữ các contract HTTP/SignalR, validation tại đầu vào, snapshot khi reconnect, phân biệt thứ tự tọa độ và cơ chế chống phản hồi cũ. Giữ label/ARIA, trạng thái bàn phím, attribution OpenStreetMap/FOSSGIS và license thư viện. Nếu thay asset frontend, kiểm tra query phiên bản CSS/JS đang khai báo trong `index.html`.

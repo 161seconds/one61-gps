@@ -3,6 +3,15 @@ const $ = id => document.getElementById(id);
 let language = 'vi';
 try { const saved = localStorage.getItem('gps-language'); if (saved === 'en' || saved === 'vi') language = saved; } catch { }
 const english = {
+  'Xe demo': 'Demo car', 'Tốc độ (km/h)': 'Speed (km/h)', 'Chạy xe': 'Start car', 'Tạm dừng': 'Pause', 'Về đầu': 'Reset',
+  'Tiến độ xe demo': 'Demo car progress',
+  'Gửi vị trí demo tới mọi thiết bị. Tắt GPS thật trên thiết bị khác.': 'Shares demo locations with every device. Turn off real GPS on other devices.',
+  'Chọn tuyến ô tô để chạy demo.': 'Choose a car route to run the demo.',
+  'Sẵn sàng · {total}': 'Ready · {total}',
+  'Xe đang chạy · {distance} / {total}': 'Car running · {distance} / {total}',
+  'Đã tạm dừng · {distance} / {total}': 'Paused · {distance} / {total}',
+  'Đã đến cuối tuyến · {total}': 'Arrived · {total}',
+  'Đang gửi vị trí xe demo.': 'Sharing demo car locations.',
   'Điều phối hành trình': 'Journey planning', 'Ngôn ngữ': 'Language',
   'Điểm đến và GPS': 'Destinations and GPS', 'Hành trình': 'Journey',
   'Điểm đầu': 'Start', 'Điểm đến': 'Destination', 'Điểm cuối': 'Destination',
@@ -83,8 +92,10 @@ function applyLanguage() {
   applyTheme();
   $('start-coordinates').value = coordinates(startPoint); $('end-coordinates').value = coordinates(endPoint);
   marker?.setTooltipContent(t('GPS hiện tại')); startMarker?.setTooltipContent(t('Điểm đầu')); endMarker?.setTooltipContent(t('Điểm cuối'));
+  marker?.getElement()?.setAttribute('title', t('GPS hiện tại'));
   for (const [index, route] of roadRoutes.entries()) $(`${index === 0 ? 'primary' : 'secondary'}-distance`).textContent = formatDistance(route.distance);
   if (roadRoutes.length) selectRoadRoute(selectedRoute);
+  updateDemo();
   for (const button of document.querySelectorAll('.leaflet-control-zoom a')) {
     button.title = t(button.classList.contains('leaflet-control-zoom-in') ? 'Phóng to' : 'Thu nhỏ'); button.setAttribute('aria-label', button.title);
   }
@@ -110,6 +121,7 @@ let latest, marker, circle, startMarker, endMarker, startPoint, endPoint, select
 let routeSequence = -1, watchId, generation = 0, activeRequest, lastGpsSent = 0;
 let connecting = false, syncing = true, buffered = [], routeSaving = false, routePending, deferredRoute;
 let directionsRequest, directionsKey, roadRoutes = [], selectedRoute = 0;
+let demoTimer, demoRoute, demoPoints = [], demoDistances = [0], demoMetres = 0, demoSegment = 1, demoAt = 0, demoSpeed = 60;
 function error(message = '') { setText('error', message); $('error').hidden = !message; }
 function state(message, live = false) { setText('connection', message); $('connection').classList.toggle('live', live); }
 function coordinates(point) { return point ? `${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)}` : t('Chưa chọn'); }
@@ -124,7 +136,7 @@ function applyLocation(point) {
   if (!point || (latest && point.sequence <= latest.sequence)) return;
   latest = point; $('recenter').disabled = false; const latlng = [point.latitude, point.longitude];
   if (!marker) {
-    marker = L.circleMarker(latlng, { radius: 8, color: '#fff', weight: 3, fillColor: '#2586c7', fillOpacity: 1 }).addTo(map).bindTooltip(t('GPS hiện tại'));
+    marker = L.marker(latlng, { title: t('GPS hiện tại'), zIndexOffset: 1000, icon: L.divIcon({ className: 'vehicle-marker', html: '<svg class="icon" aria-hidden="true"><use href="/icons.svg#car"></use></svg>', iconSize: [36, 36], iconAnchor: [18, 18] }) }).addTo(map).bindTooltip(t('GPS hiện tại'));
     circle = L.circle(latlng, { radius: point.accuracy, color: '#2586c7', weight: 1, fillOpacity: .1 }).addTo(map);
     if ($('follow-gps').checked) map.setView(latlng, 16);
   } else {
@@ -157,7 +169,7 @@ function selectRoadRoute(index) {
     $(`route-${i === 0 ? 'primary' : 'secondary'}`).checked = selected;
   }
   [roadRoute, alternativeRoute][index].bringToFront();
-  marker?.bringToFront();
+  if (demoRoute !== roadRoutes[index]) resetDemo(roadRoutes[index]);
   setText('directions-status', '{distance} · Tuyến {route}{only}', { distance: formatDistance(roadRoutes[index].distance), route: index + 1, only: roadRoutes.length === 1 ? t(' · Chỉ có một tuyến phù hợp') : '' });
 }
 async function findDirections(force = false) {
@@ -166,6 +178,7 @@ async function findDirections(force = false) {
   if (!force && key === directionsKey) return;
   directionsKey = key; directionsRequest?.abort(); directionsRequest = undefined;
   roadRoutes = []; roadRoute.setLatLngs([]); alternativeRoute.setLatLngs([]); $('route-options').hidden = true;
+  resetDemo(null);
   $('directions-retry').hidden = true; $('directions-status').hidden = !enabled;
   if (!enabled) return;
   if (!startPoint || !endPoint) { setText('directions-status', 'Chọn đủ điểm đầu và điểm cuối.'); return; }
@@ -240,20 +253,60 @@ async function connect() {
 }
 function stop() {
   generation++; activeRequest?.abort(); activeRequest = undefined; lastGpsSent = 0;
+  clearInterval(demoTimer); demoTimer = undefined; updateDemo();
   if (watchId !== undefined) navigator.geolocation.clearWatch(watchId);
   watchId = undefined; $('gps').disabled = false; $('stop').disabled = true; setText('sharing', 'Đã dừng gửi GPS.');
 }
 async function publish(point, current) {
-  if (current !== generation || activeRequest) return;
+  if (current !== generation || activeRequest) return false;
   const request = new AbortController(); activeRequest = request; const timeout = setTimeout(() => request.abort(), 10000);
   try {
     const response = await fetch('/api/location', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(point), signal: request.signal });
-    if (current !== generation || response.status === 409) return;
+    if (current !== generation || response.status === 409) return false;
     if (!response.ok) throw new Error();
-    const result = await response.json(); if (current !== generation) return;
-    receive('location', result); error();
-  } catch (failure) { if (current === generation) error(failure.name === 'AbortError' ? 'Gửi GPS quá lâu. Vị trí tiếp theo sẽ thử lại.' : 'Chưa gửi được GPS. Kiểm tra mạng hoặc máy chủ.'); }
+    const result = await response.json(); if (current !== generation) return false;
+    receive('location', result); error(); return true;
+  } catch (failure) { if (current === generation) error(failure.name === 'AbortError' ? 'Gửi GPS quá lâu. Vị trí tiếp theo sẽ thử lại.' : 'Chưa gửi được GPS. Kiểm tra mạng hoặc máy chủ.'); return false; }
   finally { clearTimeout(timeout); if (activeRequest === request) activeRequest = undefined; }
+}
+function updateDemo() {
+  const total = demoDistances.at(-1), running = demoTimer !== undefined;
+  $('demo-start').disabled = !total || running; $('demo-pause').disabled = !running; $('demo-reset').disabled = !total; $('demo-speed').disabled = running;
+  $('demo-progress').value = total ? demoMetres / total : 0;
+  const message = !total ? 'Chọn tuyến ô tô để chạy demo.' : running ? 'Xe đang chạy · {distance} / {total}' : demoMetres >= total ? 'Đã đến cuối tuyến · {total}' : demoMetres ? 'Đã tạm dừng · {distance} / {total}' : 'Sẵn sàng · {total}';
+  setText('demo-status', message, { distance: formatDistance(demoMetres), total: formatDistance(total) });
+}
+function resetDemo(route = demoRoute) {
+  if (demoTimer !== undefined) stop();
+  demoRoute = route; demoPoints = route ? route.geometry.coordinates.map(([lng, lat]) => L.latLng(lat, lng)) : [];
+  demoDistances = [0]; demoMetres = 0; demoSegment = 1;
+  for (let i = 1; i < demoPoints.length; i++) demoDistances.push(demoDistances[i - 1] + demoPoints[i - 1].distanceTo(demoPoints[i]));
+  updateDemo();
+}
+function demoPosition() {
+  while (demoSegment < demoPoints.length - 1 && demoDistances[demoSegment] <= demoMetres) demoSegment++;
+  const a = demoPoints[demoSegment - 1], b = demoPoints[demoSegment], length = demoDistances[demoSegment] - demoDistances[demoSegment - 1];
+  const fraction = length ? (demoMetres - demoDistances[demoSegment - 1]) / length : 1;
+  const delta = (b.lng - a.lng + 540) % 360 - 180;
+  return { latitude: a.lat + (b.lat - a.lat) * fraction, longitude: (a.lng + delta * fraction + 540) % 360 - 180 };
+}
+function publishDemoPoint() {
+  const captured = Math.max(Date.now(), (Date.parse(latest?.capturedAt) || 0) + 1);
+  return publish({ ...demoPosition(), accuracy: 0, capturedAt: new Date(captured).toISOString() }, generation);
+}
+async function tickDemo() {
+  if (demoTimer === undefined || activeRequest) return;
+  const current = generation, now = performance.now();
+  demoMetres = Math.min(demoDistances.at(-1), demoMetres + (now - demoAt) * demoSpeed / 3600); demoAt = now; updateDemo();
+  if (await publishDemoPoint() && current === generation && demoMetres >= demoDistances.at(-1)) stop();
+}
+function startDemo() {
+  if (!demoDistances.at(-1) || !$('demo-speed').reportValidity() || demoTimer !== undefined) return;
+  stop(); error();
+  if (demoMetres >= demoDistances.at(-1)) { demoMetres = 0; demoSegment = 1; }
+  demoSpeed = Number($('demo-speed').value); demoAt = performance.now();
+  // shortcut: playback runs in this tab; move scheduling server-side when background operation is required.
+  demoTimer = setInterval(tickDemo, 1000); updateDemo(); $('stop').disabled = false; setText('sharing', 'Đang gửi vị trí xe demo.'); tickDemo();
 }
 function startGps() {
   if (!window.isSecureContext || !navigator.geolocation) { error('GPS cần HTTPS (hoặc localhost) và trình duyệt hỗ trợ vị trí.'); return; }
@@ -322,6 +375,8 @@ for (const endpoint of ['start', 'end']) $(`${endpoint}-link-form`).onsubmit = e
 $('choose-start').onclick = () => choose('start'); $('choose-end').onclick = () => choose('end'); $('gps').onclick = startGps; $('stop').onclick = stop; $('retry').onclick = connect;
 $('routing').onchange = () => findDirections(); $('directions-retry').onclick = () => findDirections(true);
 $('route-primary').onchange = () => selectRoadRoute(0); $('route-secondary').onchange = () => selectRoadRoute(1);
+$('demo-start').onclick = startDemo; $('demo-pause').onclick = stop;
+$('demo-reset').onclick = () => { if (!demoDistances.at(-1)) return; stop(); resetDemo(); publishDemoPoint(); };
 roadRoute.on('click', () => selectRoadRoute(0)); alternativeRoute.on('click', () => selectRoadRoute(1));
 $('follow-gps').onchange = () => { if ($('follow-gps').checked && latest) map.panTo([latest.latitude, latest.longitude], { animate: true }); };
 $('recenter').onclick = () => { if (!latest) return; $('follow-gps').checked = true; $('follow-gps').onchange(); };
