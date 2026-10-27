@@ -46,7 +46,7 @@ function frontend(saved = null, systemDark = true, savedLanguage = null) {
     },
     documentElement: { dataset: {} }, getElementById(id) {
       if (!elements.has(id)) elements.set(id, {
-        value: '', dataset: {}, checked: id === 'follow-gps', innerHTML: iconMarkup,
+        value: '', dataset: {}, checked: id === 'follow-gps', disabled: id === 'recenter', innerHTML: iconMarkup,
         set textContent(value) { this.text = value; this.innerHTML = ''; }, get textContent() { return this.text || ''; },
         button: { dataset: {}, innerHTML: iconMarkup, set textContent(value) { this.text = value; this.innerHTML = ''; }, setAttribute(name, value) { this[name] = value; }, getAttribute(name) { return this[name] ?? null; } },
         querySelector() { return this.button; }, addEventListener() { }, setAttribute(name, value) { this[name] = value; }, getAttribute(name) { return this[name] ?? null; }, classList: { toggle() { } }
@@ -64,7 +64,7 @@ function frontend(saved = null, systemDark = true, savedLanguage = null) {
     setLatLng(value) { this.points = value; return this; }, setRadius() { return this; },
     setLatLngs(value) { this.points = value; return this; }, getLatLngs() { return this.points; }
   });
-  const map = { on(event, handler) { this[event] = handler; return this; }, setView(points) { this.center = points; return this; }, panTo(points) { this.center = points; return this; }, getSize() { return { y: this.height || 400 }; }, fitBounds(points, options) { this.bounds = points; this.padding = options; return this; }, removeLayer(value) { value.removed = true; } };
+  const map = { on(event, handler) { this[event] = handler; return this; }, setView(points, zoom) { this.center = points; this.zoom = zoom; return this; }, panTo(points) { this.center = points; return this; }, getSize() { return { y: this.height || 400 }; }, fitBounds(points, options) { this.bounds = points; this.padding = options; return this; }, removeLayer(value) { value.removed = true; } };
   const hub = { state: 'Disconnected', start: () => new Promise(() => { }), on() { }, onreconnecting() { }, onreconnected() { }, onclose() { }, invoke: async () => ({ start: null, end: null, location: null, routeSequence: 0 }) };
   const context = createContext({
     document, history: { replaceState() { } }, location: { pathname: '/' },
@@ -130,8 +130,17 @@ async function checkFrontend() {
     assert.deepEqual(JSON.parse(JSON.stringify(ui.map.padding)), { paddingTopLeft: [24, 64], paddingBottomRight: [24, bottom], maxZoom: 16 }, 'route framing reserves overlays without exhausting short maps');
   }
   const point = { latitude: 10, longitude: 106, accuracy: 5, capturedAt: new Date().toISOString(), receivedAt: new Date().toISOString(), sequence: 1 };
+  const recenter = ui.document.getElementById('recenter');
+  assert.equal(recenter.disabled, true, 'recenter starts disabled without GPS');
+  ui.document.getElementById('follow-gps').checked = false;
+  const initialCenter = JSON.stringify(ui.map.center);
+  recenter.onclick();
+  assert.equal(JSON.stringify(ui.map.center), initialCenter, 'recenter without GPS leaves map unchanged');
+  assert.equal(ui.document.getElementById('follow-gps').checked, false, 'recenter without GPS leaves follow unchanged');
+  ui.document.getElementById('follow-gps').checked = true;
   ui.context.point = point;
   runInContext('applyLocation(point)', ui.context);
+  assert.equal(recenter.disabled, false, 'GPS enables recenter');
   assert.deepEqual(Array.from(ui.map.center), [point.latitude, point.longitude], 'follow GPS centers first location');
   const follow = ui.document.getElementById('follow-gps');
   follow.checked = false; follow.onchange();
@@ -143,14 +152,24 @@ async function checkFrontend() {
   assert.deepEqual(Array.from(ui.map.center), [10.6, point.longitude], 'follow tracks later GPS');
   ui.map.dragstart();
   assert.equal(follow.checked, false, 'manual map drag disables GPS follow');
+  runInContext('applyLocation({ ...point, latitude: 10.7, sequence: 4 })', ui.context);
+  const zoom = ui.map.zoom;
+  recenter.onclick();
+  assert.deepEqual(Array.from(ui.map.center), [10.7, point.longitude], 'recenter uses latest GPS after dragging');
+  assert.equal(follow.checked, true, 'recenter resumes follow');
+  assert.equal(ui.map.zoom, zoom, 'recenter preserves zoom');
+  runInContext('applyLocation({ ...point, latitude: 10.8, sequence: 5 })', ui.context);
+  assert.deepEqual(Array.from(ui.map.center), [10.8, point.longitude], 'recenter follows later updates');
   const replacement = { ...point, latitude: 11 };
   ui.hub.invoke = async () => ({ start: null, end: null, location: replacement, routeSequence: 0 });
   await runInContext('sync()', ui.context);
   assert.equal(runInContext('marker.points[0]', ui.context), 11, 'equal sequence snapshot replaces old point');
   assert.equal(runInContext('trail.getLatLngs().length', ui.context), 1, 'snapshot resets trail');
+  assert.equal(recenter.disabled, false, 'snapshot GPS keeps recenter enabled');
   ui.hub.invoke = async () => ({ start: null, end: null, location: null, routeSequence: 0 });
   await runInContext('sync()', ui.context);
   assert.equal(runInContext('latest === undefined && marker === undefined && circle === undefined && trail.getLatLngs().length === 0', ui.context), true, 'empty snapshot clears GPS');
+  assert.equal(recenter.disabled, true, 'empty snapshot disables recenter');
   const newer = { ...point, latitude: 12, sequence: 2 };
   ui.context.newer = newer;
   ui.hub.invoke = async () => { runInContext("receive('location', newer)", ui.context); return { start: null, end: null, location: point, routeSequence: 0 }; };
@@ -386,7 +405,7 @@ try {
   await a.stop();
   await a.start();
   assert.deepEqual(await a.invoke('GetState'), expected, 'reconnect snapshot');
-  console.log('PASS: English/Vietnamese language, road routing geometry, long routes, cancellation/retry, Google Maps links, A/B import, theme, frontend reconnect, assets, route/GPS validation, two viewers.');
+  console.log('PASS: GPS recenter/follow, English/Vietnamese language, road routing geometry, long routes, cancellation/retry, Google Maps links, A/B import, theme, frontend reconnect, assets, route/GPS validation, two viewers.');
 } finally {
   await Promise.all(connections.map(connection => connection.stop()));
 }

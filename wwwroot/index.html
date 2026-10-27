@@ -2,8 +2,8 @@
 <html lang="vi">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="strict-origin-when-cross-origin">
-<title>GPS realtime</title><link rel="stylesheet" href="/vendor/leaflet.css"><link rel="stylesheet" href="/style.css?v=16">
-<script defer src="/vendor/leaflet.js"></script><script defer src="/vendor/signalr.min.js"></script><script defer src="/app.js?v=13"></script>
+<title>GPS realtime</title><link rel="stylesheet" href="/vendor/leaflet.css"><link rel="stylesheet" href="/style.css?v=17">
+<script defer src="/vendor/leaflet.js"></script><script defer src="/vendor/signalr.min.js"></script><script defer src="/app.js?v=14"></script>
 </head>
 <body>
 <header class="topbar">
@@ -47,6 +47,7 @@
   </aside>
   <section class="map-panel" aria-label="Bản đồ hành trình" data-i18n-aria-label>
     <div id="map" aria-label="Bản đồ điểm đầu, điểm đến và GPS hiện tại" data-i18n-aria-label></div>
+    <button id="recenter" class="icon-button" type="button" aria-label="Về vị trí GPS hiện tại" title="Về vị trí GPS hiện tại" data-i18n-aria-label data-i18n-title disabled><svg class="icon" aria-hidden="true"><use href="/icons.svg#crosshair"></use></svg></button>
     <div class="map-heading"><div class="map-title"><svg class="icon" aria-hidden="true"><use href="/icons.svg#navigation"></use></svg><h2 data-i18n>Bản đồ hành trình</h2></div><span id="freshness" class="badge" role="status" data-i18n>Chưa có GPS</span></div>
     <div class="map-caption" aria-label="Chú giải bản đồ" data-i18n-aria-label><span><i></i><span data-i18n>Vị trí GPS</span></span><span><i class="route-key"></i><span data-i18n>Tuyến đang chọn</span></span><span><i class="route-key alternative-key"></i><span data-i18n>Tuyến còn lại</span></span></div>
   </section>

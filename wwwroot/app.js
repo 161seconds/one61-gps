@@ -21,7 +21,7 @@ const english = {
   'Chưa có GPS': 'No GPS yet', 'Chú giải bản đồ': 'Map legend', 'Vị trí GPS': 'GPS location',
   'Tuyến đang chọn': 'Selected route', 'Tuyến còn lại': 'Other route',
   'Chế độ sáng': 'Light mode', 'Chế độ tối': 'Dark mode', 'GPS hiện tại': 'Current GPS',
-  'Phóng to': 'Zoom in', 'Thu nhỏ': 'Zoom out',
+  'Phóng to': 'Zoom in', 'Thu nhỏ': 'Zoom out', 'Về vị trí GPS hiện tại': 'Return to current GPS location',
   '{time} · {age} giây trước': '{time} · {age} seconds ago', '{time} · 1 giây trước': '{time} · 1 second ago',
   'GPS đã cũ': 'GPS out of date', 'GPS trực tiếp': 'Live GPS',
   '{distance} · Tuyến {route}{only}': '{distance} · Route {route}{only}',
@@ -122,7 +122,7 @@ function updateAge() {
 }
 function applyLocation(point) {
   if (!point || (latest && point.sequence <= latest.sequence)) return;
-  latest = point; const latlng = [point.latitude, point.longitude];
+  latest = point; $('recenter').disabled = false; const latlng = [point.latitude, point.longitude];
   if (!marker) {
     marker = L.circleMarker(latlng, { radius: 8, color: '#fff', weight: 3, fillColor: '#2586c7', fillOpacity: 1 }).addTo(map).bindTooltip(t('GPS hiện tại'));
     circle = L.circle(latlng, { radius: point.accuracy, color: '#2586c7', weight: 1, fillOpacity: .1 }).addTo(map);
@@ -222,7 +222,7 @@ async function sync() {
   syncing = true;
   try {
     const snapshot = await connection.invoke('GetState');
-    latest = undefined; if (marker) map.removeLayer(marker); if (circle) map.removeLayer(circle); marker = circle = undefined; trail.setLatLngs([]);
+    latest = undefined; $('recenter').disabled = true; if (marker) map.removeLayer(marker); if (circle) map.removeLayer(circle); marker = circle = undefined; trail.setLatLngs([]);
     setText('coordinates', 'Chưa có vị trí'); $('accuracy').textContent = '—'; setText('received', '—'); setText('freshness', 'Chưa có GPS'); $('freshness').className = 'badge';
     routeSequence = -1; applyRoute({ start: snapshot.start, end: snapshot.end, sequence: snapshot.routeSequence }); applyLocation(snapshot.location);
     for (const event of buffered.sort((a, b) => a.value.sequence - b.value.sequence)) { if (event.type === 'location') applyLocation(event.value); else applyRoute(event.value); }
@@ -324,6 +324,7 @@ $('routing').onchange = () => findDirections(); $('directions-retry').onclick = 
 $('route-primary').onchange = () => selectRoadRoute(0); $('route-secondary').onchange = () => selectRoadRoute(1);
 roadRoute.on('click', () => selectRoadRoute(0)); alternativeRoute.on('click', () => selectRoadRoute(1));
 $('follow-gps').onchange = () => { if ($('follow-gps').checked && latest) map.panTo([latest.latitude, latest.longitude], { animate: true }); };
+$('recenter').onclick = () => { if (!latest) return; $('follow-gps').checked = true; $('follow-gps').onchange(); };
 map.on('dragstart', () => { $('follow-gps').checked = false; });
 $('language').onchange = () => {
   const value = $('language').value; if (value !== 'en' && value !== 'vi') return;

@@ -35,7 +35,7 @@ Valhalla prioritizes distance on the OpenStreetMap road network, respecting mapp
 
 Routing snaps endpoints to nearby roads within 200 m. It does not draw invented connectors or substitute straight lines when routing fails. Some journeys have only one valid route; no alternative is fabricated. Changing an endpoint recalculates the route. Routing mode and route selection are local to each tab.
 
-**Follow GPS** is enabled by default. Disable it or drag the map to explore; enable it again to return to the current location. A completed route request does not interrupt fresh GPS following. GPS positions are not snapped to the selected route, and leaving the route does not trigger automatic rerouting.
+**Follow GPS** is enabled by default. Disable it or drag the map to explore; the crosshair button beside the zoom controls returns to the latest shared GPS location and resumes following without changing the zoom. It is disabled until a location is available. A completed route request does not interrupt fresh GPS following. GPS positions are not snapped to the selected route, and leaving the route does not trigger automatic rerouting.
 
 The theme button switches between light and dark mode, including the map. The first visit follows the system theme; later visits use the saved choice. Dark map tiles use a CSS color filter, leaving routes and GPS markers unchanged.
 
